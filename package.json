@@ -1,0 +1,50 @@
+{
+  "name": "scripts-toolbox",
+  "version": "1.0.0",
+  "description": "Collection of utility scripts for web scraping, data processing, and automation",
+  "main": "index.js",
+  "license": "MIT",
+  "author": "Javier",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/javigm98/scripts-toolbox.git"
+  },
+  "keywords": [
+    "scripts",
+    "scraper",
+    "automation",
+    "metacritic",
+    "howlongtobeat",
+    "excel",
+    "utilities"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.2.1",
+    "@types/string-similarity": "^4.0.2",
+    "@types/xlsx": "^0.0.36",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "howlongtobeat": "^1.8.0",
+    "puppeteer": "^24.34.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "string-similarity": "^4.0.4",
+    "xlsx": "^0.18.5"
+  },
+  "scripts": {
+    "metacritic": "ts-node src/scripts/metacritic-to-excel.ts",
+    "scrape": "ts-node src/scripts/metacritic-to-excel.ts",
+    "payroll-summary": "ts-node src/scripts/payroll-summary/process-payroll-summary.ts",
+    "hltb": "ts-node src/scripts/hltb-search.ts",
+    "hltb-direct": "ts-node src/scripts/hltb-direct.ts",
+    "hltb-csv": "ts-node src/scripts/hltb-from-csv.ts",
+    "hltb-auto": "ts-node src/scripts/hltb-puppeteer.ts",
+    "hltb-sync": "ts-node src/scripts/hltb-sync.ts",
+    "cex-search": "ts-node src/scripts/cex-search.ts",
+    "ign-rankings": "ts-node src/scripts/ign-rankings-scraper.ts",
+    "slug-matcher": "ts-node src/scripts/game-slug-matcher.ts"
+  }
+}

@@ -164,7 +164,7 @@ function findBestMatch(
 }
 
 async function main() {
-  const inputFile = path.join(process.cwd(), 'data/2023-Videojuegos.ods');
+  const inputFile = path.join(process.cwd(), 'data/vg-transition.xlsx');
 
   console.log(`Leyendo archivo: ${inputFile}`);
 
@@ -175,10 +175,10 @@ async function main() {
 
   const workbook = XLSX.readFile(inputFile);
 
-  // Leer pestaña Videojuegos_2
-  const sheet1 = workbook.Sheets['Videojuegos_2'];
+  // Leer pestaña vg_sync
+  const sheet1 = workbook.Sheets['vg_sync'];
   if (!sheet1) {
-    console.error('Error: No se encontró la pestaña "Videojuegos_2"');
+    console.error('Error: No se encontró la pestaña "vg_sync"');
     process.exit(1);
   }
   const data1: any[][] = XLSX.utils.sheet_to_json(sheet1, { header: 1 });
@@ -217,27 +217,45 @@ async function main() {
     }
   }
 
-  console.log(`\nEncontrados ${videoGames.length} juegos en Videojuegos_2`);
+  console.log(`\nEncontrados ${videoGames.length} juegos en vg_sync`);
   console.log(`Encontrados ${fetchedGames.length} juegos en fetched`);
   console.log(`\nBuscando mejores matches...\n`);
 
-  // Buscar matches
-  const results: MatchResult[] = [];
-  let processed = 0;
+  // Agregar headers a vg_sync (columnas I-M, índices 8-12)
+  if (data1[0]) {
+    data1[0][8] = 'Matched Title';
+    data1[0][9] = 'Matched Year';
+    data1[0][10] = 'Slug';
+    data1[0][11] = 'Confidence Score';
+    data1[0][12] = 'Year Difference';
+  }
 
-  for (const game of videoGames) {
-    const match = findBestMatch(game.name, game.releaseYear, fetchedGames);
+  // Buscar matches y agregar a vg_sync
+  let processed = 0;
+  let foundMatches = 0;
+
+  for (let i = 1; i < data1.length; i++) {
+    const row = data1[i];
+    if (!row || !row[0]) continue;
+
+    const gameName = String(row[0]);
+    const gameYear = Number(row[1]) || 0;
+
+    const match = findBestMatch(gameName, gameYear, fetchedGames);
 
     if (match) {
-      results.push({
-        originalName: game.name,
-        originalYear: game.releaseYear,
-        matchedTitle: match.game.title,
-        matchedYear: match.game.premiereYear,
-        slug: match.game.slug,
-        confidenceScore: Math.round(match.score * 100), // Convertir a 0-100
-        yearDifference: Math.abs(game.releaseYear - match.game.premiereYear),
-      });
+      row[8] = match.game.title;
+      row[9] = match.game.premiereYear;
+      row[10] = match.game.slug;
+      row[11] = Math.round(match.score * 100); // Convertir a 0-100
+      row[12] = Math.abs(gameYear - match.game.premiereYear);
+      foundMatches++;
+    } else {
+      row[8] = '';
+      row[9] = '';
+      row[10] = '';
+      row[11] = 0;
+      row[12] = 0;
     }
 
     processed++;
@@ -246,37 +264,31 @@ async function main() {
     }
   }
 
-  // Exportar a Excel y JSON
-  const timestamp = new Date().toISOString().split('T')[0];
-  const outputExcel = path.join(
-    process.cwd(),
-    `data/game-slug-matches-${timestamp}.xlsx`
-  );
-  const outputJson = path.join(
-    process.cwd(),
-    `data/game-slug-matches-${timestamp}.json`
-  );
+  // Actualizar worksheet con los datos modificados
+  const newSheet = XLSX.utils.aoa_to_sheet(data1);
 
-  // Crear Excel
-  const ws = XLSX.utils.json_to_sheet(results);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Matches');
-  XLSX.writeFile(wb, outputExcel);
+  // Agregar filtros automáticos a todas las columnas
+  if (newSheet['!ref']) {
+    newSheet['!autofilter'] = { ref: newSheet['!ref'] };
+  }
 
-  // Crear JSON
-  fs.writeFileSync(outputJson, JSON.stringify(results, null, 2));
+  workbook.Sheets['vg_sync'] = newSheet;
+
+  // Sobrescribir archivo original
+  XLSX.writeFile(workbook, inputFile);
 
   // Resultados
-  console.log(`\n✓ Procesados ${results.length} juegos`);
-  console.log(`✓ Excel: ${outputExcel}`);
-  console.log(`✓ JSON: ${outputJson}`);
+  console.log(`\n✓ Procesados ${processed} juegos`);
+  console.log(`✓ Matches encontrados: ${foundMatches}`);
+  console.log(`✓ Archivo actualizado: ${inputFile}`);
 
   // Estadísticas
-  const highConfidence = results.filter((r) => r.confidenceScore >= 80).length;
-  const mediumConfidence = results.filter(
-    (r) => r.confidenceScore >= 60 && r.confidenceScore < 80
+  const matches = data1.slice(1).filter((r) => r && r[11] > 0);
+  const highConfidence = matches.filter((r) => r[11] >= 80).length;
+  const mediumConfidence = matches.filter(
+    (r) => r[11] >= 60 && r[11] < 80
   ).length;
-  const lowConfidence = results.filter((r) => r.confidenceScore < 60).length;
+  const lowConfidence = matches.filter((r) => r[11] < 60).length;
 
   console.log(`\nEstadísticas de confianza:`);
   console.log(`  Alta (≥80%):     ${highConfidence}`);
@@ -284,15 +296,15 @@ async function main() {
   console.log(`  Baja (<60%):     ${lowConfidence}`);
 
   // Mostrar algunos ejemplos de baja confianza para revisión manual
-  const lowConfidenceExamples = results
-    .filter((r) => r.confidenceScore < 60)
+  const lowConfidenceExamples = matches
+    .filter((r) => r[11] < 60)
     .slice(0, 5);
 
   if (lowConfidenceExamples.length > 0) {
     console.log(`\nEjemplos de baja confianza (revisar manualmente):`);
     lowConfidenceExamples.forEach((r) => {
       console.log(
-        `  "${r.originalName}" (${r.originalYear}) → "${r.matchedTitle}" (${r.matchedYear}) - ${r.confidenceScore}%`
+        `  "${r[0]}" (${r[1]}) → "${r[8]}" (${r[9]}) - ${r[11]}%`
       );
     });
   }

@@ -5,10 +5,11 @@ A collection of utility scripts for web scraping, data processing, and automatio
 ## Overview
 
 This is a miscellaneous project containing various TypeScript scripts for different purposes:
-- Web scraping (Metacritic, IGN, HowLongToBeat)
-- Data conversion (JSON to Excel)
-- Game data processing and matching
-- Payroll summary processing
+- **QVET Automation** - Download reports from QVET veterinary app
+- **Web scraping** - Metacritic, IGN, HowLongToBeat
+- **Data conversion** - JSON to Excel
+- **Game data processing** - Matching and synchronization
+- **Payroll summary processing**
 
 ## Installation
 
@@ -19,6 +20,80 @@ yarn install
 ```
 
 ## Available Scripts
+
+### 🏥 QVET Automation
+
+Download reports and edit articles in QVET veterinary application. **[📖 Full Documentation](docs/QVET.md)**
+
+#### Download Reports
+
+```bash
+# Quick Start - Simple report
+npm run qvet-api -- 508 Proveedores
+
+# With parameters (dates)
+npm run qvet-api -- 716 "Listado-cierre-caja" \
+  --param:DESDE_FECHA=01/12/2025 \
+  --param:HASTA_FECHA=31/12/2025
+
+# Using Puppeteer (browser automation)
+npm run qvet-auto "Proveedores"
+```
+
+#### Mass Article Editor
+
+Edit multiple article fields using Excel as interface.
+
+```bash
+# Step 1: Generate Excel with current article data
+npm run qvet-prepare
+
+# Step 2: Edit the Excel file (modify values in "Editar" sheet)
+# The file will be at: data/qvet/articulos-TIMESTAMP.xlsx
+
+# Step 3: Apply changes to QVET
+npm run qvet-edit -- data/qvet/articulos-TIMESTAMP.xlsx
+```
+
+**Supported Fields (25 total):**
+
+| Category | Fields |
+|----------|--------|
+| General Data | DESCRIPCION, Descripcion_2, REFERENCIA, MARCA |
+| Checkboxes | Activo, Visible_Ventas, Visible_Compras, Solo_Escandallo |
+| Prices | P_Minimo, Upc_Bi, Imp_Ventas, Imp_Compras |
+| Tariffs | Tarifa_Ord_PVP, Tarifa_Ord_MargenC, Tarifa_Ord_MargenV |
+| Warehouse (Harbor) | Stock_Min_Harbor, Stock_Opt_Harbor, Compra_Min_Harbor |
+| Warehouse (Montejo) | Stock_Min_Montejo, Stock_Opt_Montejo, Compra_Min_Montejo |
+| Warehouse (Urban) | Stock_Min_Urban, Stock_Opt_Urban, Compra_Min_Urban |
+| Notes | Observaciones |
+
+**Not Supported:** Seccion, Familia, Subfamilia (cascade dropdowns require manual selection)
+
+**How it works:**
+1. Excel has two sheets: "Original" (read-only reference) and "Editar" (make changes here)
+2. Script compares both sheets and detects differences
+3. Opens each article in browser, applies changes, and saves
+4. Generates detailed report (JSON + Markdown)
+
+**Output:**
+```
+data/qvet/
+├── articulos-TIMESTAMP.xlsx  # Excel for editing
+├── reporte-TIMESTAMP.json    # Detailed results
+└── reporte-TIMESTAMP.md      # Human-readable report
+```
+
+**Features:**
+- ⚡ Fast API mode (10-15 sec)
+- 🔧 Auto-detects report parameters
+- 📝 Complete logging with timestamps
+- 📁 Organized output structure
+- 🌐 Puppeteer fallback for debugging
+
+**[➡️ See full QVET documentation](docs/QVET.md)** for detailed examples and troubleshooting.
+
+---
 
 ### 🎮 Game Data Scripts
 
@@ -113,6 +188,10 @@ npm run payroll-summary
 scripts-toolbox/
 ├── src/
 │   └── scripts/
+│       ├── qvet-api.ts                     # QVET report download (API)
+│       ├── qvet-puppeteer.ts               # QVET report download (Puppeteer)
+│       ├── qvet-prepare-edit.ts            # QVET mass editor - prepare Excel
+│       ├── qvet-process-edit.ts            # QVET mass editor - apply changes
 │       ├── metacritic-to-excel.ts          # Metacritic scraper
 │       ├── hltb-puppeteer.ts               # HLTB automated search
 │       ├── hltb-from-csv.ts                # HLTB CSV import

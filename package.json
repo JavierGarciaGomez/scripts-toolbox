@@ -21,17 +21,20 @@
   "devDependencies": {
     "@types/node": "^24.2.1",
     "@types/string-similarity": "^4.0.2",
+    "@types/uuid": "^10.0.0",
     "@types/xlsx": "^0.0.36",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   },
   "dependencies": {
     "axios": "^1.11.0",
+    "exceljs": "^4.4.0",
     "howlongtobeat": "^1.8.0",
     "puppeteer": "^24.34.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "string-similarity": "^4.0.4",
+    "uuid": "^13.0.0",
     "xlsx": "^0.18.5"
   },
   "scripts": {
@@ -45,6 +48,13 @@
     "hltb-sync": "ts-node src/scripts/hltb-sync.ts",
     "cex-search": "ts-node src/scripts/cex-search.ts",
     "ign-rankings": "ts-node src/scripts/ign-rankings-scraper.ts",
-    "slug-matcher": "ts-node src/scripts/game-slug-matcher.ts"
+    "slug-matcher": "ts-node src/scripts/game-slug-matcher.ts",
+    "qvet": "ts-node src/scripts/qvet-download.ts",
+    "qvet-auto": "ts-node src/scripts/qvet-puppeteer.ts",
+    "qvet-api": "ts-node src/scripts/qvet-api.ts",
+    "qvet-prepare": "ts-node src/scripts/qvet-prepare-edit.ts",
+    "qvet-edit": "ts-node src/scripts/qvet-process-edit.ts",
+    "audit-stock": "ts-node src/scripts/audit-stock.ts",
+    "payroll-totals": "ts-node src/scripts/payroll-totals.ts"
   }
 }

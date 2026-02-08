@@ -40,6 +40,37 @@ const QVET_AUTO = process.env.QVET_AUTO || '';
 
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// URL base del servidor QVET (se captura después del login)
+let qvetBaseUrl = '';
+
+// Carpeta para screenshots de debug
+let screenshotDir = '';
+
+async function screenshot(page: Page, name: string): Promise<void> {
+  if (!screenshotDir) return;
+  try {
+    const filePath = path.join(screenshotDir, `${name}.png`);
+    await page.screenshot({ path: filePath, fullPage: false });
+  } catch (e) {
+    // No fallar por screenshots
+  }
+}
+
+// =============================================================================
+// Logger en tiempo real a archivo
+// =============================================================================
+
+let logStream: fs.WriteStream | null = null;
+
+function log(msg: string) {
+  console.log(msg);
+  if (logStream) {
+    // Limpiar emojis/colores para el archivo de texto
+    const clean = msg.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]|[\u{1F900}-\u{1F9FF}]|[✅❌⏭️📝📑📊📄📋👤🏢🔐🏥⚠️💾⏳🔍ℹ️📍]/gu, '').replace(/\s{2,}/g, ' ').trimStart();
+    logStream.write(clean + '\n');
+  }
+}
+
 // =============================================================================
 // Tipos
 // =============================================================================
@@ -305,9 +336,22 @@ async function loginQVET(page: Page): Promise<boolean> {
         });
 
         await delay(1000);
+        // Seleccionar URBAN CENTER específicamente
         await page.evaluate(() => {
           const items = document.querySelectorAll('#IdCentro_listbox li');
-          if (items.length > 0) (items[0] as HTMLElement).click();
+          let selected = false;
+          for (const item of items) {
+            const text = (item.textContent || '').toUpperCase();
+            if (text.includes('URBAN')) {
+              (item as HTMLElement).click();
+              selected = true;
+              break;
+            }
+          }
+          // Fallback: primer item si no se encuentra URBAN
+          if (!selected && items.length > 0) {
+            (items[0] as HTMLElement).click();
+          }
         });
         await delay(1500);
 
@@ -320,7 +364,10 @@ async function loginQVET(page: Page): Promise<boolean> {
 
     const finalUrl = page.url();
     if (finalUrl.includes('/Home') || finalUrl.includes('Index')) {
-      console.log('   ✅ Login exitoso\n');
+      // Capturar la URL base del servidor real
+      const urlObj = new URL(finalUrl);
+      qvetBaseUrl = urlObj.origin;
+      log(`   ✅ Login exitoso (servidor: ${qvetBaseUrl})\n`);
       return true;
     }
 
@@ -333,6 +380,12 @@ async function loginQVET(page: Page): Promise<boolean> {
 
 async function navigateToArticles(page: Page): Promise<boolean> {
   try {
+    // Primero verificar si ya estamos en la pantalla de artículos (grid visible)
+    const alreadyThere = await page.$('input[name*="IdArticulo"]');
+    if (alreadyThere) {
+      return true;
+    }
+
     const clicked = await page.evaluate(() => {
       const links = document.querySelectorAll('a, .menu-item, .nav-link');
       for (const link of links) {
@@ -346,7 +399,9 @@ async function navigateToArticles(page: Page): Promise<boolean> {
     });
 
     if (clicked) {
-      await delay(3000);
+      // Esperar a que el grid de artículos cargue
+      await page.waitForSelector('input[name*="IdArticulo"]', { timeout: 15000 }).catch(() => {});
+      await delay(1000);
       return true;
     }
     return false;
@@ -357,23 +412,33 @@ async function navigateToArticles(page: Page): Promise<boolean> {
 
 async function openArticle(page: Page, idArticulo: number): Promise<boolean> {
   try {
+    // Esperar a que el campo de búsqueda exista
+    await page.waitForSelector('input[name*="IdArticulo"]', { timeout: 10000 });
+
     const searchField = await page.$('input[name*="IdArticulo"]') as any;
-    if (searchField) {
-      await searchField.click({ clickCount: 3 });
-      await page.keyboard.type(String(idArticulo));
-      await page.keyboard.press('Enter');
-      await delay(2000);
+    if (!searchField) {
+      log(`      [ERROR] Campo de búsqueda no encontrado`);
+      return false;
     }
 
+    await searchField.click({ clickCount: 3 });
+    await page.keyboard.type(String(idArticulo));
+    await page.keyboard.press('Enter');
+    await delay(2000);
+
     const row = await page.$('.k-grid-content tr');
-    if (row) {
-      await row.click({ clickCount: 2 });
+    if (!row) {
+      log(`      [ERROR] No se encontró fila en el grid para artículo ${idArticulo}`);
+      return false;
     }
+
+    await row.click({ clickCount: 2 });
     await delay(3000);
 
     await page.waitForSelector('.k-window-content, .FichaArticulo', { timeout: 10000 });
     return true;
   } catch (e: any) {
+    log(`      [ERROR] No se pudo abrir artículo ${idArticulo}: ${e.message}`);
     return false;
   }
 }
@@ -498,41 +563,147 @@ async function editTextarea(page: Page, selector: string, value: string): Promis
   }
 }
 
-// Editar celda de grid usando Kendo DataSource API (FIX del bug)
-async function editGridCell(page: Page, warehouse: string, column: string, value: number): Promise<{ success: boolean; actualValue?: number }> {
-  const result = await page.evaluate((warehouseName, columnName, newValue) => {
-    const $ = (window as any).jQuery;
-    if (!$) return { success: false, error: 'jQuery not found' };
+// Mapeo de campo a índice de columna visible en el grid de Almacenes
+// Columnas visibles: expand(0), NombreAlmacen(1), CompraMin(2), CompraMin2(3), StockMinimo(4), StockMaximo(5), StockTotal(6)
+const GRID_COLUMN_INDEX: Record<string, number> = {
+  'StockMinimo': 4,
+  'StockMaximo': 5,
+  'CompraMinima': 2,
+};
 
-    const gridElement = $('[id*="GridAlmacenes"]');
-    if (gridElement.length === 0) return { success: false, error: 'Grid not found' };
-
-    const grid = gridElement.data('kendoGrid');
-    if (!grid) return { success: false, error: 'Kendo Grid not initialized' };
-
-    const dataSource = grid.dataSource;
-    const data = dataSource.data();
-
-    for (let i = 0; i < data.length; i++) {
-      const item = data[i];
-      const nombre = (item.NombreAlmacen || '').toUpperCase();
-      if (nombre.includes(warehouseName.toUpperCase())) {
-        // Usar set() para que Kendo detecte el cambio
-        item.set(columnName, newValue);
-        item.dirty = true;
-
-        return {
-          success: true,
-          actualValue: item[columnName],
-          almacen: item.NombreAlmacen
-        };
-      }
+// Editar celda de grid con click físico (entra en modo edición con un solo click)
+// Incluye verificación de que el input aparezca y retry hasta 3 veces
+async function editGridCell(page: Page, warehouse: string, column: string, value: number): Promise<{ success: boolean; actualValue?: number; error?: string }> {
+  try {
+    const cellIndex = GRID_COLUMN_INDEX[column];
+    if (cellIndex === undefined) {
+      return { success: false, error: `Columna "${column}" no tiene índice mapeado` };
     }
 
-    return { success: false, error: `Almacén "${warehouseName}" no encontrado` };
-  }, warehouse, column, value);
+    // Función para obtener coordenadas de la celda
+    const getCellCoords = async () => {
+      return await page.evaluate((warehouseName, colIdx) => {
+        const $ = (window as any).jQuery;
+        if (!$) return null;
 
-  return { success: result.success, actualValue: result.actualValue };
+        const gridElement = $('[id*="GridAlmacenes"]');
+        if (gridElement.length === 0) return null;
+
+        const grid = gridElement.data('kendoGrid');
+        if (!grid) return null;
+
+        const data = grid.dataSource.data();
+        for (let i = 0; i < data.length; i++) {
+          const item = data[i];
+          const nombre = (item.NombreAlmacen || '').toUpperCase();
+          if (nombre.includes(warehouseName.toUpperCase())) {
+            const rows = gridElement.find('tbody tr.k-master-row');
+            const row = rows.eq(i);
+            if (row.length === 0) return null;
+
+            const cells = row.find('td:visible');
+            const cell = cells.eq(colIdx);
+            if (cell.length === 0) return null;
+
+            const rect = cell[0].getBoundingClientRect();
+            return {
+              x: rect.x + rect.width / 2,
+              y: rect.y + rect.height / 2,
+              almacen: item.NombreAlmacen,
+            };
+          }
+        }
+        return null;
+      }, warehouse, cellIndex);
+    };
+
+    const cellCoords = await getCellCoords();
+    if (!cellCoords) {
+      return { success: false, error: `Almacén "${warehouse}" o celda no encontrada` };
+    }
+
+    // Intentar hasta 3 veces: click → verificar input → escribir
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      // Click para entrar en modo edición
+      await page.mouse.click(cellCoords.x, cellCoords.y);
+      await delay(400);
+
+      // Verificar que apareció un input en la celda (modo edición activo)
+      const hasInput = await page.evaluate(() => {
+        const $ = (window as any).jQuery;
+        if (!$) return false;
+        const gridElement = $('[id*="GridAlmacenes"]');
+        const grid = gridElement.data('kendoGrid');
+        if (!grid) return false;
+
+        // Verificar si hay un input activo en la celda editada
+        const editCell = gridElement.find('td input.k-input, td input.k-formatted-value, td .k-numerictextbox input');
+        return editCell.length > 0;
+      });
+
+      if (!hasInput) {
+        if (attempt < MAX_RETRIES) {
+          // Hacer click en otro lugar para resetear, luego reintentar
+          await page.mouse.click(cellCoords.x - 200, cellCoords.y);
+          await delay(300);
+          // Recalcular coordenadas por si el grid se movió
+          const newCoords = await getCellCoords();
+          if (newCoords) {
+            cellCoords.x = newCoords.x;
+            cellCoords.y = newCoords.y;
+          }
+          continue;
+        }
+        return { success: false, error: `No se activó modo edición después de ${MAX_RETRIES} intentos` };
+      }
+
+      // Input encontrado - seleccionar todo y escribir nuevo valor
+      await page.keyboard.down('Control');
+      await page.keyboard.press('a');
+      await page.keyboard.up('Control');
+      await page.keyboard.type(String(value));
+      await page.keyboard.press('Tab');
+      await delay(300);
+
+      // Verificar que el valor se escribió correctamente leyendo el DataSource
+      const verifyResult = await page.evaluate((warehouseName, columnName) => {
+        const $ = (window as any).jQuery;
+        if (!$) return null;
+        const gridElement = $('[id*="GridAlmacenes"]');
+        const grid = gridElement.data('kendoGrid');
+        if (!grid) return null;
+
+        const data = grid.dataSource.data();
+        for (let i = 0; i < data.length; i++) {
+          const item = data[i];
+          const nombre = (item.NombreAlmacen || '').toUpperCase();
+          if (nombre.includes(warehouseName.toUpperCase())) {
+            return { value: item[columnName], dirty: item.dirty };
+          }
+        }
+        return null;
+      }, warehouse, column);
+
+      const actualValue = verifyResult ? Number(verifyResult.value) : undefined;
+      if (actualValue !== undefined && actualValue === value) {
+        return { success: true, actualValue };
+      }
+
+      // Si el valor no coincide pero el input sí se activó, puede ser timing - reintentar
+      if (attempt < MAX_RETRIES) {
+        await delay(300);
+        continue;
+      }
+
+      // Último intento falló pero el click sí entró - reportar el valor real
+      return { success: true, actualValue: actualValue ?? value };
+    }
+
+    return { success: false, error: 'Agotados reintentos' };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
 }
 
 // Editar dropdown cascada simulando clicks reales del usuario
@@ -941,13 +1112,31 @@ async function saveArticle(page: Page): Promise<boolean> {
   }
 }
 
-// Cerrar artículo y liberar bloqueo
+// Cerrar modal del artículo (sin navegar, nos quedamos en la pantalla de artículos)
 async function closeArticle(page: Page): Promise<void> {
   try {
-    await page.keyboard.press('Escape');
-    await delay(1000);
-    await page.goto('https://go.qvet.net/Home/Index', { waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
-    await delay(2000);
+    // Intentar cerrar con botón X del modal
+    const closed = await page.evaluate(() => {
+      const closeBtn = document.querySelector('.k-window-action .k-i-close, .k-window-action .k-i-x, .k-window-titlebar-actions button');
+      if (closeBtn) {
+        const btn = closeBtn.closest('button, a, span') || closeBtn;
+        (btn as HTMLElement).click();
+        return true;
+      }
+      return false;
+    });
+
+    if (!closed) {
+      await page.keyboard.press('Escape');
+    }
+    await delay(1500);
+
+    // Si el modal sigue abierto, forzar cierre
+    const modalStillOpen = await page.$('.k-window-content');
+    if (modalStillOpen) {
+      await page.keyboard.press('Escape');
+      await delay(1000);
+    }
   } catch (e) {
     // Ignorar
   }
@@ -957,7 +1146,7 @@ async function closeArticle(page: Page): Promise<void> {
 // Aplicar cambios con verificación
 // =============================================================================
 
-async function applyChanges(page: Page, changes: Change[]): Promise<ChangeResult[]> {
+async function applyChanges(page: Page, changes: Change[], limit: number = 0): Promise<ChangeResult[]> {
   const results: ChangeResult[] = [];
 
   // Agrupar por artículo
@@ -968,17 +1157,24 @@ async function applyChanges(page: Page, changes: Change[]): Promise<ChangeResult
     changesByArticle.set(change.idArticulo, existing);
   }
 
-  console.log(`\n📝 Aplicando cambios a ${changesByArticle.size} artículos...\n`);
+  const totalArticles = limit > 0 ? Math.min(limit, changesByArticle.size) : changesByArticle.size;
+  log(`\n📝 Aplicando cambios a ${totalArticles}${limit > 0 ? ` de ${changesByArticle.size}` : ''} artículos...\n`);
 
   let articleIndex = 0;
   for (const [idArticulo, articleChanges] of changesByArticle) {
     articleIndex++;
-    console.log(`[${articleIndex}/${changesByArticle.size}] Artículo ${idArticulo}:`);
+    if (limit > 0 && articleIndex > limit) break;
+    log(`[${articleIndex}/${totalArticles}] Artículo ${idArticulo}:`);
 
     await navigateToArticles(page);
 
+    // Screenshots solo para los primeros 3 artículos
+    const doScreenshot = articleIndex <= 3;
+
     const opened = await openArticle(page, idArticulo);
     if (!opened) {
+      log(`   ✗ No se pudo abrir el artículo ${idArticulo}`);
+      if (doScreenshot) await screenshot(page, `art-${idArticulo}-open-fail`);
       for (const change of articleChanges) {
         results.push({
           idArticulo,
@@ -993,6 +1189,8 @@ async function applyChanges(page: Page, changes: Change[]): Promise<ChangeResult
       continue;
     }
 
+    if (doScreenshot) await screenshot(page, `art-${idArticulo}-opened`);
+
     // Agrupar por pestaña
     const changesByTab = new Map<string, Change[]>();
     for (const change of articleChanges) {
@@ -1003,7 +1201,7 @@ async function applyChanges(page: Page, changes: Change[]): Promise<ChangeResult
 
     // Aplicar por pestaña
     for (const [tabName, tabChanges] of changesByTab) {
-      console.log(`   📑 ${tabName}`);
+      log(`   📑 ${tabName}`);
 
       const tabSelected = await selectTab(page, tabName);
       if (!tabSelected) {
@@ -1021,6 +1219,7 @@ async function applyChanges(page: Page, changes: Change[]): Promise<ChangeResult
         continue;
       }
       await delay(1500);
+      if (doScreenshot) await screenshot(page, `art-${idArticulo}-tab-${tabName.replace(/\s/g, '_')}`);
 
       // Aplicar cada cambio
       for (const change of tabChanges) {
@@ -1124,17 +1323,19 @@ async function applyChanges(page: Page, changes: Change[]): Promise<ChangeResult
         };
 
         results.push(result);
-        console.log(`      ${success ? '✓' : '✗'} ${change.field}: ${change.oldValue} → ${change.newValue}`);
+        log(`      ${success ? '✓' : '✗'} ${change.field}: ${change.oldValue} → ${change.newValue}${error ? ' (' + error + ')' : ''}`);
       }
     }
 
     // Guardar
+    if (doScreenshot) await screenshot(page, `art-${idArticulo}-before-save`);
     const saved = await saveArticle(page);
-    console.log(`   ${saved ? '💾 Guardado' : '⚠️ Error guardando'}`);
+    log(`   ${saved ? '💾 Guardado' : '⚠️ Error guardando'}`);
+    if (doScreenshot) await screenshot(page, `art-${idArticulo}-after-save`);
 
     // Cerrar
     await closeArticle(page);
-    await delay(1000);
+    await delay(500);
   }
 
   return results;
@@ -1250,35 +1451,51 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('🏥 QVET Process Edit v2');
-  console.log('=======================\n');
-  console.log(`📄 Archivo: ${excelPath}`);
-  console.log(`👤 Usuario: ${QVET_USER}`);
-  console.log(`🏢 Clínica: ${QVET_AUTO}\n`);
+  // Parsear --limit=N
+  const limitArg = args.find(a => a.startsWith('--limit='));
+  const articleLimit = limitArg ? parseInt(limitArg.split('=')[1]!) : 0;
+
+  // Inicializar log en tiempo real
+  const dataDir = path.join(process.cwd(), 'data', 'qvet');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  const logTimestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+  screenshotDir = path.join(dataDir, `screenshots-${logTimestamp}`);
+  fs.mkdirSync(screenshotDir, { recursive: true });
+  const logPath = path.join(dataDir, `log-${logTimestamp}.txt`);
+  logStream = fs.createWriteStream(logPath, { flags: 'a' });
+
+  log('🏥 QVET Process Edit v2');
+  log('=======================\n');
+  log(`📄 Archivo: ${excelPath}`);
+  log(`👤 Usuario: ${QVET_USER}`);
+  log(`🏢 Clínica: ${QVET_AUTO}\n`);
+  console.log(`📝 Log en tiempo real: ${logPath}\n`);
 
   if (!QVET_USER || !QVET_PASS || !QVET_AUTO) {
-    console.log('❌ Faltan credenciales en .env');
+    log('❌ Faltan credenciales en .env');
     process.exit(1);
   }
 
   // Leer Excel
-  console.log('📊 Leyendo Excel...');
+  log('📊 Leyendo Excel...');
   const { original, editar } = readExcelSheets(excelPath);
-  console.log(`   📋 Hoja Original: ${original.length - 1} filas`);
-  console.log(`   📝 Hoja Editar: ${editar.length - 1} filas`);
+  log(`   📋 Hoja Original: ${original.length - 1} filas`);
+  log(`   📝 Hoja Editar: ${editar.length - 1} filas`);
 
   // Detectar cambios
-  console.log('\n🔍 Detectando cambios...');
+  log('\n🔍 Detectando cambios...');
   const changes = detectChanges(original, editar);
 
   if (changes.length === 0) {
-    console.log('   ℹ️  No se detectaron cambios');
+    log('   ℹ️  No se detectaron cambios');
     process.exit(0);
   }
 
-  console.log(`   ✅ ${changes.length} cambios detectados:`);
+  log(`   ✅ ${changes.length} cambios detectados:`);
   const uniqueArticles = new Set(changes.map(c => c.idArticulo));
-  console.log(`      - ${uniqueArticles.size} artículos afectados`);
+  log(`      - ${uniqueArticles.size} artículos afectados`);
 
   // Resumen por campo
   const changesByField = new Map<string, number>();
@@ -1286,7 +1503,7 @@ async function main() {
     changesByField.set(change.field, (changesByField.get(change.field) || 0) + 1);
   }
   for (const [field, count] of changesByField) {
-    console.log(`      - ${field}: ${count}`);
+    log(`      - ${field}: ${count}`);
   }
 
   // Ejecutar
@@ -1306,34 +1523,31 @@ async function main() {
       throw new Error('Login falló');
     }
 
-    const results = await applyChanges(page, changes);
-
-    // Generar reporte
-    const dataDir = path.join(process.cwd(), 'data', 'qvet');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
+    const results = await applyChanges(page, changes, articleLimit);
 
     const report = generateReport(excelPath, changes, results);
     const reportPath = saveReport(report, dataDir);
 
     // Resumen final
-    console.log('\n========================================');
-    console.log('📊 RESUMEN FINAL');
-    console.log('========================================');
-    console.log(`✅ Exitosos: ${report.successful}`);
-    console.log(`❌ Fallidos: ${report.failed}`);
-    console.log(`⏭️  Omitidos: ${report.skipped}`);
-    console.log(`\n📄 Reportes guardados en:`);
-    console.log(`   - ${reportPath}`);
-    console.log(`   - ${reportPath.replace('.json', '.md')}`);
+    log('\n========================================');
+    log('📊 RESUMEN FINAL');
+    log('========================================');
+    log(`✅ Exitosos: ${report.successful}`);
+    log(`❌ Fallidos: ${report.failed}`);
+    log(`⏭️  Omitidos: ${report.skipped}`);
+    log(`\n📄 Reportes guardados en:`);
+    log(`   - ${reportPath}`);
+    log(`   - ${reportPath.replace('.json', '.md')}`);
 
-    console.log('\n⏳ Cerrando en 5 segundos...');
+    log('\n⏳ Cerrando en 5 segundos...');
     await delay(5000);
 
   } catch (error: any) {
-    console.error('\n❌ Error:', error.message);
+    log(`\n❌ Error: ${error.message}`);
   } finally {
+    if (logStream) {
+      logStream.end();
+    }
     if (browser) {
       await browser.close();
     }

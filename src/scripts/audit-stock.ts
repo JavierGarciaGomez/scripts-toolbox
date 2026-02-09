@@ -56,8 +56,9 @@ interface GlobalData {
   compras: number;
   ventas: number;
   traspasos: number;
-  balance: number;
+  expected: number;
   final: number;
+  diferencia: number;
   precioUnitario: number;
   perdidas: number;
   lossRate: number;
@@ -208,31 +209,36 @@ async function main() {
     // Si inicial es negativo, usar 0
     const globalInicialRaw = urbanData.inicial + harborData.inicial + montejoData.inicial;
     const globalInicial = round(Math.max(0, globalInicialRaw));
-    const globalFinal = round(
-      urbanData.final + harborData.final + montejoData.final
-    );
-    const balance = round(
-      urbanData.validacion + harborData.validacion + montejoData.validacion
-    );
-    const perdidas = round(balance * precioUnitario);
-    // LossRate: balance / (inicial + compras) * 100
     const globalCompras = round(
       urbanData.compras + harborData.compras + montejoData.compras
     );
-    const totalEntradas = globalInicial + globalCompras;
-    const lossRate = totalEntradas !== 0 ? round((balance / totalEntradas) * 100) : 0;
+    const globalVentas = round(
+      urbanData.ventas + harborData.ventas + montejoData.ventas
+    );
+    const globalTraspasos = round(
+      urbanData.traspasos + harborData.traspasos + montejoData.traspasos
+    );
+    const globalFinal = round(
+      urbanData.final + harborData.final + montejoData.final
+    );
+
+    // Expected = inicial + compras + ventas + traspasos
+    const expected = round(globalInicial + globalCompras + globalVentas + globalTraspasos);
+    // Diferencia = expected - final
+    const diferencia = round(expected - globalFinal);
+    // LossRate: diferencia / (inicial + compras + traspasos) * 100
+    const entradas = globalInicial + globalCompras + globalTraspasos;
+    const lossRate = entradas !== 0 ? round((diferencia / entradas) * 100) : 0;
+    const perdidas = round(diferencia * precioUnitario);
 
     const globalData: GlobalData = {
       inicial: globalInicial,
-      compras: round(
-        urbanData.compras + harborData.compras + montejoData.compras
-      ),
-      ventas: round(urbanData.ventas + harborData.ventas + montejoData.ventas),
-      traspasos: round(
-        urbanData.traspasos + harborData.traspasos + montejoData.traspasos
-      ),
-      balance,
+      compras: globalCompras,
+      ventas: globalVentas,
+      traspasos: globalTraspasos,
+      expected,
       final: globalFinal,
+      diferencia,
       precioUnitario,
       perdidas,
       lossRate,
@@ -300,8 +306,9 @@ async function main() {
     { key: "g_com", width: 6 },
     { key: "g_ven", width: 6 },
     { key: "g_tra", width: 6 },
+    { key: "g_exp", width: 6 },
     { key: "g_fin", width: 6 },
-    { key: "g_val", width: 6 },
+    { key: "g_dif", width: 6 },
     { key: "g_pre", width: 8 },
     { key: "g_per", width: 9 },
     { key: "g_loss", width: 6 },
@@ -342,13 +349,15 @@ async function main() {
     "",
     "",
     "",
+    "",
+    "",
   ];
 
   // Merge cells for warehouse names (shifted for new columns)
   ws.mergeCells("G1:L1");   // URBAN: cols 7-12
   ws.mergeCells("M1:R1");   // HARBOR: cols 13-18
   ws.mergeCells("S1:X1");   // MONTEJO: cols 19-24
-  ws.mergeCells("Y1:AG1");  // GLOBAL: cols 25-33
+  ws.mergeCells("Y1:AH1");  // GLOBAL: cols 25-34 (added Exp column)
 
   // Style row 1
   const styleHeaderCell = (
@@ -408,8 +417,9 @@ async function main() {
     "Com",
     "Ven",
     "Tra",
+    "Exp",
     "Fin",
-    "Val",
+    "Dif",
     "Precio",
     "Pérdidas",
     "Loss%",
@@ -450,7 +460,7 @@ async function main() {
         pattern: "solid",
         fgColor: { argb: "FCE4D6" },
       }; // Light orange - MONTEJO
-    } else if (colNumber >= 25 && colNumber <= 33) {
+    } else if (colNumber >= 25 && colNumber <= 34) {
       cell.fill = {
         type: "pattern",
         pattern: "solid",
@@ -494,8 +504,9 @@ async function main() {
       r.global.compras,
       r.global.ventas,
       r.global.traspasos,
+      r.global.expected,
       r.global.final,
-      r.global.balance,
+      r.global.diferencia,
       r.global.precioUnitario,
       r.global.perdidas,
       r.global.lossRate,
@@ -517,13 +528,13 @@ async function main() {
       };
 
       // Format specific columns
-      if (colNumber === 31) {
+      if (colNumber === 32) {
         // Precio - currency
         cell.numFmt = '"$"#,##0.00';
-      } else if (colNumber === 32) {
+      } else if (colNumber === 33) {
         // Pérdidas - currency
         cell.numFmt = '"$"#,##0.00';
-      } else if (colNumber === 33) {
+      } else if (colNumber === 34) {
         // Loss% - percentage
         cell.numFmt = '0.00"%"';
       }
@@ -548,12 +559,12 @@ async function main() {
   const lastRow = results.length + 2;
   ws.autoFilter = {
     from: { row: 2, column: 1 },
-    to: { row: lastRow, column: 33 },
+    to: { row: lastRow, column: 34 },
   };
 
   // Workaround: Add _FilterDatabase defined name for Excel compatibility
   const sheetName = "Main";
-  const filterRange = `'${sheetName}'!$A$2:$AG$${lastRow}`;
+  const filterRange = `'${sheetName}'!$A$2:$AH$${lastRow}`;
 
   // Get existing defined names or empty array
   const existingNames = (workbook.definedNames as any)._model || [];
@@ -576,7 +587,7 @@ async function main() {
   console.log(`⚠️  Nota: Los filtros deben agregarse manualmente en Excel (Ctrl+Shift+L)`);
 
   // Summary
-  const discrepancies = results.filter((r) => r.global.balance !== 0);
+  const discrepancies = results.filter((r) => r.global.diferencia !== 0);
   const totalPerdidas = results.reduce((sum, r) => sum + r.global.perdidas, 0);
 
   console.log(`\n📊 Resumen:`);

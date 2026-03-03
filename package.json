@@ -54,6 +54,9 @@
     "qvet-api": "ts-node src/scripts/qvet-api.ts",
     "qvet-prepare": "ts-node src/scripts/qvet-prepare-edit.ts",
     "qvet-edit": "ts-node src/scripts/qvet-process-edit.ts",
+    "qvet-items": "ts-node src/scripts/qvet/update-articles.ts",
+    "qvet-items-prepare": "ts-node src/scripts/qvet/prepare-edit.ts",
+    "qvet-items-convert-stock": "ts-node src/scripts/qvet/convert-stock.ts",
     "audit-stock": "ts-node src/scripts/audit-stock.ts",
     "payroll-totals": "ts-node src/scripts/payroll-totals.ts"
   }

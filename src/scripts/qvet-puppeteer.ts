@@ -27,8 +27,8 @@ try {
 }
 
 // Configuración
-const QVET_USER = process.env.QVET_USER || 'JAVIERH';
-const QVET_PASS = process.env.QVET_PASS || 'Victorhug0.-';
+const QVET_USER = process.env.QVET_USER || 'HVP-Admin';
+const QVET_PASS = process.env.QVET_PASS || 'HVP-123';
 const QVET_AUTO = process.env.QVET_AUTO || 'HVPENINSULARSC';
 const QVET_LOCATION = process.env.QVET_LOCATION || 'URBAN';
 

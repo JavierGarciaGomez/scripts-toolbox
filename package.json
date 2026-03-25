@@ -58,6 +58,12 @@
     "qvet-items-prepare": "ts-node src/scripts/qvet/prepare-edit.ts",
     "qvet-items-convert-stock": "ts-node src/scripts/qvet/convert-stock.ts",
     "audit-stock": "ts-node src/scripts/audit-stock.ts",
-    "payroll-totals": "ts-node src/scripts/payroll-totals.ts"
+    "payroll-totals": "ts-node src/scripts/payroll-totals.ts",
+    "qvet-capture-clients": "ts-node src/scripts/qvet-capture-clients.ts",
+    "qvet-clients": "ts-node src/scripts/qvet/update-clients.ts",
+    "nominas-cfdi": "ts-node src/scripts/nominas-cfdi-2021.ts",
+    "nominas-cfdi-stamp": "ts-node src/scripts/nominas-cfdi-facturama/stamp.ts",
+    "nominas-cfdi-init": "ts-node src/scripts/nominas-cfdi-facturama/stamp.ts --init-config",
+    "nominas-cfdi-test": "node --require ts-node/register --test src/scripts/nominas-cfdi-facturama/builder.test.ts"
   }
 }

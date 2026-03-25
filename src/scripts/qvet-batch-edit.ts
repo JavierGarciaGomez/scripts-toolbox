@@ -1,7 +1,7 @@
 /**
  * QVET Batch Edit - Puppeteer
  *
- * Edita múltiples artículos agregando un texto a Referencia
+ * Edita múltiples artículos - borra el campo Referencia
  */
 
 import puppeteer, { Browser, Page } from 'puppeteer';

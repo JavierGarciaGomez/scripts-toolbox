@@ -1,5 +1,22 @@
 # Instrucciones para Claude - QVET Scripts
 
+## IMPORTANTE: Limpieza de procesos Puppeteer
+
+**SIEMPRE** que pares un proceso de Puppeteer/QVET (por kill, error, o interrupción del usuario), debes limpiar TODOS los procesos Chrome huérfanos:
+
+```bash
+ps aux | grep chrome | grep -i "remote-debugging\|no-first-run\|disable-setuid" | grep -v grep | awk '{print $2}' | xargs kill -9 2>/dev/null
+```
+
+Verifica después que no quede nada:
+```bash
+ps aux | grep -E "remote-debugging|no-first-run|disable-setuid" | grep -v grep || echo "LIMPIO"
+```
+
+No dejes navegadores de Puppeteer abiertos. Consume RAM del usuario.
+
+---
+
 ## Contexto del Proyecto QVET
 
 QVET es un sistema de gestión veterinaria (ASP.NET MVC con Kendo UI). Este proyecto contiene scripts para automatizar tareas en QVET.

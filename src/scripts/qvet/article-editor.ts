@@ -41,12 +41,14 @@ export async function navigateToArticles(page: Page): Promise<boolean> {
       for (const radio of radios) {
         const parent = radio.closest('div, label, span');
         if (parent && parent.textContent?.includes('Todos')) {
+          (radio as HTMLInputElement).checked = true;
           (radio as HTMLInputElement).click();
+          radio.dispatchEvent(new Event('change', { bubbles: true }));
           return;
         }
       }
     });
-    await delay(500);
+    await delay(1000);
 
     return true;
   } catch {
@@ -173,33 +175,48 @@ export async function inspectSelector(page: Page, selector: string): Promise<{
 
 export async function editTextField(page: Page, selector: string, value: string): Promise<boolean> {
   try {
-    // Use evaluate to find the element inside the modal (avoids matching duplicates outside)
-    const result = await page.evaluate((sel, newValue) => {
+    // Find the element inside the modal and click it
+    const coords = await page.evaluate((sel) => {
       const elements = document.querySelectorAll(sel);
-      // Prefer element inside modal (.k-window-content)
-      let target: HTMLInputElement | null = null;
+      let target: HTMLElement | null = null;
       for (let i = 0; i < elements.length; i++) {
-        const el = elements[i] as HTMLInputElement;
-        if (el.closest('.k-window-content')) {
-          target = el;
-          break;
-        }
+        const el = elements[i] as HTMLElement;
+        if (el.closest('.k-window-content')) { target = el; break; }
       }
-      // Fallback to first element
-      if (!target && elements.length > 0) {
-        target = elements[0] as HTMLInputElement;
+      if (!target && elements.length > 0) target = elements[0] as HTMLElement;
+      if (!target) return null;
+      const rect = target.getBoundingClientRect();
+      if (rect.width === 0) {
+        // Hidden field — use JS approach
+        (target as HTMLInputElement).focus();
+        (target as HTMLInputElement).value = value === '__CLEAR__' ? '' : value;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        return 'js';
       }
-      if (!target) return false;
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    }, selector);
 
-      // Focus, set value, trigger events
-      target.focus();
-      target.value = newValue;
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    }, selector, value);
+    if (coords === null) return false;
+    if (coords === 'js') return true;
 
-    return result;
+    // Physical interaction: click, select all, type new value
+    await page.mouse.click(coords.x, coords.y);
+    await delay(200);
+    await page.keyboard.down('Control');
+    await page.keyboard.press('a');
+    await page.keyboard.up('Control');
+    await delay(100);
+
+    const realValue = value === '__CLEAR__' ? '' : value;
+    if (realValue === '') {
+      await page.keyboard.press('Backspace');
+    } else {
+      await page.keyboard.type(realValue);
+    }
+    await delay(200);
+
+    return true;
   } catch {
     return false;
   }
@@ -440,7 +457,7 @@ export async function editDropdownWithClick(
     }
 
     await page.click(wrapperSelector);
-    await delay(1000);
+    await delay(300);
 
     // Ensure dropdown is open
     await page.evaluate((sel) => {
@@ -454,7 +471,7 @@ export async function editDropdownWithClick(
       }
     }, selector);
 
-    await delay(1500);
+    await delay(500);
 
     const result = await page.evaluate((searchValue, sel) => {
       const $ = (window as any).jQuery;
@@ -509,7 +526,7 @@ export async function editDropdownWithClick(
       return { success: false, error: `Valor "${searchValue}" no encontrado (${data.length} opciones: ${available.join(', ')})` };
     }, value, selector);
 
-    await delay(1000);
+    await delay(300);
     return result;
   } catch (e: any) {
     return { success: false, error: e.message };

@@ -129,6 +129,12 @@ export async function loginQVET(
     await delay(3000);
 
     await page.waitForSelector('#Clinica', { timeout: 15000 });
+    // Clear fields before typing (in case of re-login with pre-filled values)
+    await page.evaluate(() => {
+      (document.querySelector('#Clinica') as HTMLInputElement).value = '';
+      (document.querySelector('#UserName') as HTMLInputElement).value = '';
+      (document.querySelector('#Password') as HTMLInputElement).value = '';
+    });
     await page.type('#Clinica', credentials.auto, { delay: 80 });
     await delay(300);
     await page.type('#UserName', credentials.user, { delay: 80 });
